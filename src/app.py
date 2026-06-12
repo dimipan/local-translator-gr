@@ -48,7 +48,7 @@ with st.sidebar:
     num_ctx = st.select_slider(
         "Ollama num_ctx",
         options=[2048, 4096, 8192, 16384, 32768],
-        value=4096,
+        value=8192,
         help="Higher context uses more VRAM. 4096 is a safe starting point for chunked translation.",
     )
     temperature = st.slider(
@@ -84,11 +84,26 @@ with st.sidebar:
     )
 
     st.header("Glossary")
+    
+    # 1. Define the local save path
+    glossary_path = Path("glossary.txt")
+    
+    # 2. Load existing terms if the file exists
+    default_glossary = ""
+    if glossary_path.exists():
+        default_glossary = glossary_path.read_text(encoding="utf-8")
+        
+    # 3. Render the text area with the loaded text
     glossary = st.text_area(
-        "Optional translation preferences",
+        "Translation preferences (Autosaves locally)",
+        value=default_glossary,
         placeholder="Example:\nλόγος = reason / discourse depending on context\nΚωνσταντινούπολις = Constantinople",
-        height=120,
+        height=180,
     )
+    
+    # 4. If you type something new, save it to the file immediately
+    if glossary != default_glossary:
+        glossary_path.write_text(glossary, encoding="utf-8")
 
 
 client = OllamaClient(
@@ -129,6 +144,25 @@ if check:
     except OllamaError as exc:
         st.error(str(exc))
 
+# Add this right above your load_source() function
+@st.cache_data(show_spinner=False)
+def get_cached_extraction(
+    filename: str, 
+    data: bytes, 
+    engine: str, 
+    use_ocr: bool, 
+    force_ocr: bool, 
+    ocr_lang: str
+):
+    """Caches the heavy PDF extraction so it only runs once per file/settings combo."""
+    return extract_document(
+        filename,
+        data,
+        extractor_engine=engine,
+        use_ocr_for_empty_pdf_pages=use_ocr,
+        force_ocr=force_ocr,
+        ocr_lang=ocr_lang,
+    )
 
 def load_source() -> tuple[str, str, list[str], int | None]:
     if uploaded is not None:
@@ -136,17 +170,20 @@ def load_source() -> tuple[str, str, list[str], int | None]:
             "PyMuPDF (Fast)": "pymupdf", 
             "Marker (State-of-the-Art OCR)": "marker"
         }
-        doc = extract_document(
+        # Call the cached function instead of extract_document directly
+        doc = get_cached_extraction(
             uploaded.name,
             uploaded.getvalue(),
-            extractor_engine=engine_map[extractor_engine],
-            use_ocr_for_empty_pdf_pages=use_ocr,
-            force_ocr=force_ocr,
-            ocr_lang=ocr_lang,
+            engine_map[extractor_engine],
+            use_ocr,
+            force_ocr,
+            ocr_lang,
         )
         return doc.filename, doc.text, doc.warnings, doc.page_count
+    
     if manual_text.strip():
         return f"{manual_title.strip() or 'manual_text'}.txt", manual_text.strip(), [], None
+    
     return "", "", ["Upload a file or paste text first."], None
 
 

@@ -7,12 +7,27 @@ from chunking import TextChunk, chunk_text
 from ollama_client import OllamaClient
 
 
+# SYSTEM_PROMPT = """You are a professional translator from Greek to English.
+# You handle modern Greek, katharevousa, and polytonic Greek.
+# Translate faithfully into clear English.
+# Preserve paragraph boundaries, headings, names, citations, page markers, numbers, and lists.
+# Do not summarise, explain, add commentary, or wrap the answer in Markdown fences.
+# Output only the English translation.
+# """.strip()
+
 SYSTEM_PROMPT = """You are a professional translator from Greek to English.
 You handle modern Greek, katharevousa, and polytonic Greek.
 Translate faithfully into clear English.
-Preserve paragraph boundaries, headings, names, citations, page markers, numbers, and lists.
-Do not summarise, explain, add commentary, or wrap the answer in Markdown fences.
-Output only the English translation.
+
+STRUCTURAL AND FORMATTING RULES:
+- Strictly preserve all original paragraph boundaries.
+- Keep all markdown headings (e.g., #, ##) exactly as they appear in the source.
+- Keep angle brackets < > and square brackets [ ] exactly as they appear, as they denote specific manuscript additions and omissions.
+- If a word is split across a line or page break in the source text, merge it and translate it naturally.
+- Consolidate all footnotes (marked with *, †, or numbers) and place them at the very bottom of your translated output block.
+- Preserve names, citations, page markers, numbers, and lists.
+- Do not summarise, explain, add commentary, or wrap the answer in Markdown fences.
+- Output only the English translation.
 """.strip()
 
 
