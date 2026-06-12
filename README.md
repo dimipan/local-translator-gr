@@ -86,13 +86,6 @@ Instead of uploading a massive 40-page PDF at once, process documents in 5–10 
 **B. The Persistent Glossary**
 The sidebar features an autosaving Glossary. Any terms entered here are instantly saved to `glossary.txt` in your project directory, surviving app restarts and browser refreshes. 
 
-Use this to enforce consistency across your 5-10 page batches. Examples:
-```text
-ἀγχιβασίην = anxiety / approaching
-ἐδιζησάμην ἐμεωυτόν = I sought myself
-αἰ. = century (cent. / c.)
-ὑ. = footnote (fn.)
-```
 
 ---
 
