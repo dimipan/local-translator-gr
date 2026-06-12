@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Iterable
 import io
 import unicodedata
+import os
+import shutil
+import subprocess
+import tempfile
 
 
 @dataclass
@@ -35,20 +39,61 @@ def decode_text_bytes(data: bytes) -> tuple[str, str]:
     # Last-resort replacement keeps the pipeline running and surfaces a warning upstream.
     return data.decode("utf-8", errors="replace"), "utf-8-with-replacement"
 
+def extract_text_with_marker(
+    data: bytes,
+    *,
+    force_ocr: bool = False
+) -> tuple[str, list[str], int | None]:
+    """Extract text using Marker via CLI to isolate PyTorch VRAM usage."""
+    warnings: list[str] = []
+    
+    if not shutil.which("marker_single"):
+        raise RuntimeError(
+            "Marker CLI not found. Please install it in your environment: `pip install marker-pdf`"
+        )
+        
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        pdf_path = temp_path / "document.pdf"
+        out_dir = temp_path / "output"
+        
+        pdf_path.write_bytes(data)
+        
+        cmd = ["marker_single", str(pdf_path), "--output_dir", str(out_dir)]
+        if force_ocr:
+            cmd.append("--force_ocr")
+            
+        # Remove capture_output=True and text=True
+        try:
+            # This allows Marker's progress bars to show up in your terminal
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError("Marker extraction failed. Check your terminal for the exact error.") from exc
+            
+        # Marker usually nests the output in a folder named after the file stem
+        md_files = list(out_dir.rglob("*.md"))
+        if not md_files:
+            raise RuntimeError("Marker completed successfully, but no Markdown output was found.")
+            
+        text = md_files[0].read_text(encoding="utf-8")
+        text = normalise_greek_text(text)
+        
+    return text, warnings, None
 
 def extract_text_from_pdf(
     data: bytes,
     *,
     use_ocr_for_empty_pages: bool = False,
-    ocr_lang: str = "ell+eng",
+    force_ocr: bool = False,
+    ocr_lang: str = "grc+ell+eng",
     min_page_chars_before_ocr: int = 40,
 ) -> tuple[str, list[str], int]:
-    """Extract text from a PDF using PyMuPDF, with optional OCR fallback for empty/scanned pages."""
+    """Extract text from a PDF using PyMuPDF, with optional Tesseract OCR."""
     warnings: list[str] = []
     try:
         import fitz  # PyMuPDF
-    except Exception as exc:  # pragma: no cover - environment issue
-        raise RuntimeError("PyMuPDF is required for PDF extraction. Install requirements.txt.") from exc
+    except Exception as exc:
+        raise RuntimeError("PyMuPDF is required for PDF extraction.") from exc
 
     pages: list[str] = []
     doc = fitz.open(stream=data, filetype="pdf")
@@ -57,7 +102,8 @@ def extract_text_from_pdf(
         page_text = page.get_text("text", sort=True) or ""
         page_text = normalise_greek_text(page_text).strip()
 
-        if use_ocr_for_empty_pages and len(page_text) < min_page_chars_before_ocr:
+        # Trigger OCR if forced, OR if the page is empty/sparse
+        if force_ocr or (use_ocr_for_empty_pages and len(page_text) < min_page_chars_before_ocr):
             try:
                 import pytesseract
                 from PIL import Image
@@ -66,16 +112,13 @@ def extract_text_from_pdf(
                 image = Image.open(io.BytesIO(pix.tobytes("png")))
                 ocr_text = pytesseract.image_to_string(image, lang=ocr_lang)
                 ocr_text = normalise_greek_text(ocr_text).strip()
+                
                 if len(ocr_text) > len(page_text):
                     page_text = ocr_text
                 else:
-                    warnings.append(
-                        f"Page {page_index}: OCR ran but did not improve extracted text."
-                    )
+                    warnings.append(f"Page {page_index}: OCR ran but did not improve extracted text.")
             except Exception as exc:
-                warnings.append(
-                    f"Page {page_index}: native text was sparse and OCR failed or is not configured: {exc}"
-                )
+                warnings.append(f"Page {page_index}: OCR failed or is not configured: {exc}")
 
         if not page_text:
             warnings.append(f"Page {page_index}: no text extracted.")
@@ -83,6 +126,7 @@ def extract_text_from_pdf(
         pages.append(f"[Page {page_index}]\n{page_text}".strip())
 
     return "\n\n".join(pages), warnings, len(doc)
+
 
 
 def extract_text_from_xml(data: bytes) -> tuple[str, list[str]]:
@@ -110,19 +154,27 @@ def extract_document(
     filename: str,
     data: bytes,
     *,
+    extractor_engine: str = "pymupdf",
     use_ocr_for_empty_pdf_pages: bool = False,
-    ocr_lang: str = "ell+eng",
+    force_ocr: bool = False,
+    ocr_lang: str = "grc+ell+eng",
 ) -> ExtractedDocument:
     ext = Path(filename).suffix.lower().lstrip(".")
     warnings: list[str] = []
     page_count: int | None = None
 
     if ext == "pdf":
-        text, pdf_warnings, page_count = extract_text_from_pdf(
-            data,
-            use_ocr_for_empty_pages=use_ocr_for_empty_pdf_pages,
-            ocr_lang=ocr_lang,
-        )
+        if extractor_engine == "marker":
+            text, pdf_warnings, page_count = extract_text_with_marker(
+                data, force_ocr=force_ocr
+            )
+        else:
+            text, pdf_warnings, page_count = extract_text_from_pdf(
+                data,
+                use_ocr_for_empty_pages=use_ocr_for_empty_pdf_pages,
+                force_ocr=force_ocr,
+                ocr_lang=ocr_lang,
+            )
         warnings.extend(pdf_warnings)
     elif ext in {"txt", "md", "markdown"}:
         text, encoding = decode_text_bytes(data)

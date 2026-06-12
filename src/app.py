@@ -5,10 +5,10 @@ from pathlib import Path
 
 import streamlit as st
 
-from greek_doc_translator.extractors import extract_document
-from greek_doc_translator.ollama_client import OllamaClient, OllamaConfig, OllamaError
-from greek_doc_translator.translation import TranslationSettings, translate_document
-from greek_doc_translator.exporters import as_markdown, as_side_by_side_markdown, output_stem
+from extractors import extract_document
+from ollama_client import OllamaClient, OllamaConfig, OllamaError
+from translation import TranslationSettings, translate_document
+from exporters import as_markdown, as_side_by_side_markdown, output_stem
 
 
 st.set_page_config(
@@ -61,12 +61,27 @@ with st.sidebar:
     )
 
     st.header("PDF extraction")
-    use_ocr = st.checkbox(
-        "Use OCR for PDF pages with little/no text",
-        value=False,
-        help="Requires local Tesseract with Greek language data installed. Native PDF text extraction is tried first.",
+    extractor_engine = st.radio(
+        "PDF Extraction Engine",
+        options=["PyMuPDF (Fast)", "Marker (State-of-the-Art OCR)"],
+        index=0,
+        help="Marker parses layout and handles polytonic diacritics beautifully, but is slower and requires VRAM."
     )
-    ocr_lang = st.text_input("Tesseract OCR languages", value="ell+eng")
+    
+    use_ocr = st.checkbox(
+        "Use Tesseract for empty pages (PyMuPDF only)",
+        value=False,
+    )
+    force_ocr = st.checkbox(
+        "Force complete OCR",
+        value=False,
+        help="Use for scanned documents or PDFs with corrupted font mapping."
+    )
+    ocr_lang = st.text_input(
+        "Tesseract OCR languages", 
+        value="grc+ell+eng",
+        help="Use 'grc' for polytonic/ancient Greek support."
+    )
 
     st.header("Glossary")
     glossary = st.text_area(
@@ -117,10 +132,16 @@ if check:
 
 def load_source() -> tuple[str, str, list[str], int | None]:
     if uploaded is not None:
+        engine_map = {
+            "PyMuPDF (Fast)": "pymupdf", 
+            "Marker (State-of-the-Art OCR)": "marker"
+        }
         doc = extract_document(
             uploaded.name,
             uploaded.getvalue(),
+            extractor_engine=engine_map[extractor_engine],
             use_ocr_for_empty_pdf_pages=use_ocr,
+            force_ocr=force_ocr,
             ocr_lang=ocr_lang,
         )
         return doc.filename, doc.text, doc.warnings, doc.page_count
@@ -131,7 +152,8 @@ def load_source() -> tuple[str, str, list[str], int | None]:
 
 if uploaded is not None or manual_text.strip():
     try:
-        filename, source_text, warnings, page_count = load_source()
+        with st.spinner("Extracting document text (Marker may take a moment)..."):
+            filename, source_text, warnings, page_count = load_source()
         with st.chat_message("user"):
             st.write(f"Loaded **{filename}**")
             if page_count is not None:
@@ -150,7 +172,8 @@ if uploaded is not None or manual_text.strip():
 
 if translate_clicked:
     try:
-        filename, source_text, warnings, page_count = load_source()
+        with st.spinner("Extracting document text for translation..."):
+            filename, source_text, warnings, page_count = load_source()
         if not source_text.strip():
             st.error("No source text was available for translation.")
             st.stop()

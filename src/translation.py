@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from .chunking import TextChunk, chunk_text
-from .ollama_client import OllamaClient
+from chunking import TextChunk, chunk_text
+from ollama_client import OllamaClient
 
 
 SYSTEM_PROMPT = """You are a professional translator from Greek to English.

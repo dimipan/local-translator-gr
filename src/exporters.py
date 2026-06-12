@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from .translation import TranslationResult
+from translation import TranslationResult
 
 
 def output_stem(filename: str) -> str:
